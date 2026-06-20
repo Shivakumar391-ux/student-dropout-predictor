@@ -9,40 +9,16 @@ from sklearn.model_selection import train_test_split
 
 @st.cache_data
 def load_and_train():
-    # Try multiple URLs for the dataset
-    urls = [
-        ("https://archive.ics.uci.edu/static/public/697/data.csv", ";"),
-        ("https://raw.githubusercontent.com/dsrscientist/dataset1/master/student_dropout.csv", ","),
-    ]
-    
-    df = None
-    for url, sep in urls:
-        try:
-            df = pd.read_csv(url, sep=sep)
-            if len(df.columns) > 5:
-                break
-        except:
-            continue
+    url = "https://archive.ics.uci.edu/static/public/697/data.csv"
+    df = pd.read_csv(url, sep=';')
 
-    if df is None:
-        st.error("Failed to load dataset. Please check your internet connection.")
-        st.stop()
+    df['Dropout_risk'] = (df['Target'].astype(str).str.strip() == 'Dropout').astype(int)
 
-    # Auto-detect target column
-    target_col = None
-    for col in df.columns:
-        if col.lower() in ['target', 'status', 'label', 'class']:
-            target_col = col
-            break
-    if target_col is None:
-        target_col = df.columns[-1]  # fallback to last column
-
-    df['Dropout_risk'] = df[target_col].apply(lambda x: 1 if str(x).strip() == 'Dropout' else 0)
-
-    X_cls = df.drop(columns=[target_col, 'Dropout_risk'])
-    # Keep only numeric columns
+    X_cls = df.drop(columns=['Target', 'Dropout_risk'])
     X_cls = X_cls.select_dtypes(include=[np.number])
-    y_cls = df['Dropout_risk']
+    # Force float64 to avoid Python 3.14 / sklearn dtype issues
+    X_cls = X_cls.astype(np.float64)
+    y_cls = df['Dropout_risk'].astype(np.int32)
 
     scaler_cls = StandardScaler()
     X_cls_scaled = scaler_cls.fit_transform(X_cls)
@@ -51,24 +27,17 @@ def load_and_train():
     rf_cls = RandomForestClassifier(n_estimators=100, class_weight='balanced', random_state=42)
     rf_cls.fit(X_train, y_train)
 
-    # Regression - predict 2nd sem grade
     grade_col = 'Curricular units 2nd sem (grade)'
-    df_reg = df[df[target_col] != 'Dropout'].copy()
-    if grade_col in df_reg.columns:
-        X_reg = df_reg.drop(columns=[target_col, 'Dropout_risk', grade_col])
-        X_reg = X_reg.select_dtypes(include=[np.number])
-        y_reg = df_reg[grade_col]
-        scaler_reg = StandardScaler()
-        X_reg_scaled = scaler_reg.fit_transform(X_reg)
-        X_train_r, _, y_train_r, _ = train_test_split(X_reg_scaled, y_reg, test_size=0.2, random_state=42)
-        rf_reg = RandomForestRegressor(n_estimators=100, random_state=42)
-        rf_reg.fit(X_train_r, y_train_r)
-    else:
-        X_reg = X_cls
-        rf_reg = rf_cls
-        scaler_reg = scaler_cls
+    df_reg = df[df['Target'].astype(str).str.strip() != 'Dropout'].copy()
+    X_reg = df_reg.drop(columns=['Target', 'Dropout_risk', grade_col], errors='ignore')
+    X_reg = X_reg.select_dtypes(include=[np.number]).astype(np.float64)
+    y_reg = df_reg[grade_col].astype(np.float64)
+    scaler_reg = StandardScaler()
+    X_reg_scaled = scaler_reg.fit_transform(X_reg)
+    X_train_r, _, y_train_r, _ = train_test_split(X_reg_scaled, y_reg, test_size=0.2, random_state=42)
+    rf_reg = RandomForestRegressor(n_estimators=100, random_state=42)
+    rf_reg.fit(X_train_r, y_train_r)
 
-    # Clustering
     cluster_features = [c for c in [
         'Curricular units 1st sem (grade)',
         'Curricular units 2nd sem (grade)',
@@ -79,7 +48,8 @@ def load_and_train():
     ] if c in df.columns]
 
     scaler_cl = StandardScaler()
-    X_cl_scaled = scaler_cl.fit_transform(df[cluster_features])
+    X_cl = df[cluster_features].astype(np.float64)
+    X_cl_scaled = scaler_cl.fit_transform(X_cl)
     km = KMeans(n_clusters=4, random_state=42, n_init=10)
     km.fit(X_cl_scaled)
 
@@ -108,7 +78,7 @@ if page == "Dropout Risk Predictor":
         scholarship = st.selectbox("Scholarship Holder", [1, 0])
 
     if st.button("Predict Dropout Risk"):
-        input_data = pd.DataFrame(np.zeros((1, len(cls_cols))), columns=cls_cols)
+        input_data = pd.DataFrame(np.zeros((1, len(cls_cols))), columns=cls_cols, dtype=np.float64)
         for col, val in [
             ('Age at enrollment', age), ('Admission grade', admission_grade),
             ('Curricular units 1st sem (grade)', sem1_grade),
@@ -118,7 +88,7 @@ if page == "Dropout Risk Predictor":
             ('Tuition fees up to date', tuition), ('Scholarship holder', scholarship)
         ]:
             if col in cls_cols:
-                input_data[col] = val
+                input_data[col] = float(val)
         scaled = scaler_cls.transform(input_data)
         pred = rf_cls.predict(scaled)[0]
         prob = rf_cls.predict_proba(scaled)[0][1]
@@ -141,7 +111,7 @@ elif page == "Grade Predictor":
         scholarship = st.selectbox("Scholarship Holder", [1, 0])
 
     if st.button("Predict Grade"):
-        input_data = pd.DataFrame(np.zeros((1, len(reg_cols))), columns=reg_cols)
+        input_data = pd.DataFrame(np.zeros((1, len(reg_cols))), columns=reg_cols, dtype=np.float64)
         for col, val in [
             ('Age at enrollment', age), ('Admission grade', admission_grade),
             ('Curricular units 1st sem (grade)', sem1_grade),
@@ -150,7 +120,7 @@ elif page == "Grade Predictor":
             ('Tuition fees up to date', tuition), ('Scholarship holder', scholarship)
         ]:
             if col in reg_cols:
-                input_data[col] = val
+                input_data[col] = float(val)
         scaled = scaler_reg.transform(input_data)
         grade = rf_reg.predict(scaled)[0]
         st.info(f"📈 Predicted Final Grade: **{grade:.2f} / 20**")
@@ -174,7 +144,8 @@ elif page == "Student Cluster Finder":
         admission_grade = st.slider("Admission Grade", 90.0, 190.0, 130.0)
 
     if st.button("Find Cluster"):
-        input_cl = np.array([[sem1_grade, sem2_grade, sem1_approved, sem2_approved, age, admission_grade]])
+        input_cl = np.array([[sem1_grade, sem2_grade, sem1_approved,
+                              sem2_approved, age, admission_grade]], dtype=np.float64)
         scaled_cl = scaler_cl.transform(input_cl)
         cluster = km.predict(scaled_cl)[0]
         st.success(f"Cluster {cluster}: {profiles[cluster]}")
