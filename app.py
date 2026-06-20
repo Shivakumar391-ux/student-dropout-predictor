@@ -1,9 +1,7 @@
-
 import streamlit as st
 st.set_page_config(page_title="Student Dropout Predictor", page_icon="🎓", layout="wide")
 import pandas as pd
 import numpy as np
-from ucimlrepo import fetch_ucirepo
 from sklearn.preprocessing import StandardScaler
 from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
 from sklearn.cluster import KMeans
@@ -11,17 +9,17 @@ from sklearn.model_selection import train_test_split
 
 @st.cache_data
 def load_and_train():
-    dataset = fetch_ucirepo(id=697)
-    X = dataset.data.features
-    y = dataset.data.targets
-    df = pd.concat([X, y], axis=1)
+    url = "https://archive.ics.uci.edu/static/public/697/data.csv"
+    df = pd.read_csv(url, sep=';')
+
     df['Dropout_risk'] = df['Target'].apply(lambda x: 1 if x == 'Dropout' else 0)
 
     X_cls = df.drop(columns=['Target', 'Dropout_risk'])
     y_cls = df['Dropout_risk']
     scaler_cls = StandardScaler()
     X_cls_scaled = scaler_cls.fit_transform(X_cls)
-    X_train, X_test, y_train, y_test = train_test_split(X_cls_scaled, y_cls, test_size=0.2, random_state=42, stratify=y_cls)
+    X_train, X_test, y_train, y_test = train_test_split(
+        X_cls_scaled, y_cls, test_size=0.2, random_state=42, stratify=y_cls)
     rf_cls = RandomForestClassifier(n_estimators=100, class_weight='balanced', random_state=42)
     rf_cls.fit(X_train, y_train)
 
@@ -49,7 +47,8 @@ def load_and_train():
 
     return rf_cls, scaler_cls, X_cls.columns.tolist(), rf_reg, scaler_reg, X_reg.columns.tolist(), km, scaler_cl, cluster_features
 
-rf_cls, scaler_cls, cls_cols, rf_reg, scaler_reg, reg_cols, km, scaler_cl, cluster_features = load_and_train()
+with st.spinner("Loading and training models... (first load takes ~1 min)"):
+    rf_cls, scaler_cls, cls_cols, rf_reg, scaler_reg, reg_cols, km, scaler_cl, cluster_features = load_and_train()
 
 st.title("🎓 Student Dropout Risk & Performance Predictor")
 st.markdown("---")
